@@ -1,0 +1,54 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED Settings
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define SCREEN_ADDRESS 0x3C 
+
+// Pin Mapping for ESP32-S3-DEVKITC-1 Model
+#define SDA_PIN 4      // Connect to GP4
+#define SCL_PIN 5      // Connect to GP5
+#define ANALOG_PIN 1   // Connect MCP602 Output to GP1
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+const int bufferSize = 128;
+int waveBuffer[bufferSize];
+int threshold = 2000; // Trigger level for stabilization
+
+void setup() {
+  // Initialize I2C with S3 specific pins
+  Wire.begin(SDA_PIN, SCL_PIN);
+  
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    for(;;); 
+  }
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+}
+
+void loop() {
+  // Trigger logic to stabilize the wave on screen
+  int timeout = 1000;
+  while(analogRead(ANALOG_PIN) < threshold && timeout > 0) { timeout--; }
+  while(analogRead(ANALOG_PIN) > threshold && timeout > 0) { timeout--; }
+
+  // Sample data into the buffer
+  for (int i = 0; i < bufferSize; i++) {
+    waveBuffer[i] = analogRead(ANALOG_PIN);
+    delayMicroseconds(5); 
+  }
+
+  // Draw the waveform
+  display.clearDisplay();
+  for (int x = 0; x < bufferSize - 1; x++) {
+    int y1 = map(waveBuffer[x], 0, 4095, 63, 0);
+    int y2 = map(waveBuffer[x+1], 0, 4095, 63, 0);
+    display.drawLine(x, y1, x + 1, y2, SSD1306_WHITE);
+  }
+  display.display();
+}

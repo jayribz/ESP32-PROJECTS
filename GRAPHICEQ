@@ -1,0 +1,28 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// --- PINS ---
+const int pinX = A0, pinSound = A2, pinSW = 2;
+const int pinR = 3, pinG = 5, pinB = 6;
+
+// --- AUDIO & EQ LOGIC ---
+int soundOffset = 512;
+float filteredDiff = 0;
+int barHeights[16]; // Heights for each of the 16 bars
+int peakHeights[16]; // Peak hold for each bar
+
+// --- CUSTOM CHARS (Vertical Levels) ---
+byte vBar[3][8] = {
+  {0,0,0,0,0,0,0,31}, // Level 1 (Bottom line)
+  {0,0,0,0,31,31,31,31}, // Level 2 (Half block)
+  {31,31,31,31,31,31,31,31} // Level 3 (Full block)
+};
+
+// --- SYSTEM STATES ---
+int currentState = 0;
+bool lastButtonState = HIGH, gainLocked = false;
+unsigned long lastClickTime = 0;
+int clickCount = 0;
+int dynamicSensitivity = 150;

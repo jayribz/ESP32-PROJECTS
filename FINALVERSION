@@ -1,0 +1,89 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include "arduinoFFT.h"
+
+// --- PINS ---
+const int S_PIN = 34, X_PIN = 35, SW_PIN = 32;
+const int LED_R = 13, LED_G = 12, LED_B = 14;
+
+// --- FFT SETTINGS ---
+#define SAMPLES 64             
+#define SAMPLING_FREQ 10000    
+double vReal[SAMPLES];
+double vImag[SAMPLES];
+ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLING_FREQ);
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+int barHeights[16];
+int peakHeights[16];
+int soundOffset = 2100; // TUNED TO THE PLOTTER DATA
+
+byte vBar[3][8] = {{0,0,0,0,0,0,0,31}, {0,0,0,0,31,31,31,31}, {31,31,31,31,31,31,31,31}};
+
+void setup() {
+  Serial.begin(115200);
+  lcd.init(); lcd.backlight();
+  lcd.createChar(0, vBar[0]); lcd.createChar(1, vBar[1]); lcd.createChar(2, vBar[2]);
+  
+  pinMode(SW_PIN, INPUT_PULLUP);
+  ledcAttach(LED_R, 5000, 8); ledcAttach(LED_G, 5000, 8); ledcAttach(LED_B, 5000, 8);
+}
+
+void loop() {
+  // 1. SAMPLE AUDIO
+  for (int i = 0; i < SAMPLES; i++) {
+    unsigned long t = micros();
+    // Use a 2100 offset
+    vReal[i] = (double)analogRead(S_PIN) - 2100; 
+    vImag[i] = 0;
+    while (micros() - t < (1000000 / SAMPLING_FREQ)); 
+  }
+
+  // 2. RUN FFT
+  FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.compute(FFT_FORWARD);
+  FFT.complexToMagnitude();
+
+  // 3. JOYSTICK SENSITIVITY
+  // We make the range wider so "Full Bars" only happens on loud noise
+  int dynamicGain = map(analogRead(X_PIN), 0, 4095, 3000, 200);
+
+  // 4. PROCESS EQ BARS
+  for (int i = 0; i < 16; i++) {
+    double val = vReal[i + 2]; 
+    
+    // NOISE GATE: 
+    // It ignores the small "wiggles".
+    if (val < 150) val = 0; 
+
+    int h = map(val, 0, dynamicGain, 0, 8);
+    barHeights[i] = constrain(h, 0, 8);
+
+    // Peak decay
+    if (barHeights[i] > peakHeights[i]) peakHeights[i] = barHeights[i];
+    else if (millis() % 40 == 0 && peakHeights[i] > 0) peakHeights[i]--;
+  }
+
+  // 5. DRAW TO LCD
+  for (int i = 0; i < 16; i++) {
+    lcd.setCursor(i, 1);
+    if (barHeights[i] < 1) lcd.print(" ");
+    else if (barHeights[i] < 3) lcd.write(0);
+    else if (barHeights[i] < 6) lcd.write(1);
+    else lcd.write(2);
+
+    lcd.setCursor(i, 0);
+    if (barHeights[i] > 6) lcd.write(0); else lcd.print(" ");
+  }
+
+  // 6. RAINBOW LED
+  float hue = (millis() % 6000) / 6000.0;
+  // Let's use the Bass bin (index 2) to pulse the LED
+  int pulse = map(vReal[2], 0, dynamicGain, 0, 255);
+  pulse = constrain(pulse, 0, 255);
+
+  int r = (int)((sin(hue * 2 * PI) * 127 + 128) * pulse / 255);
+  int g = (int)((sin(hue * 2 * PI + 2.1) * 127 + 128) * pulse / 255);
+  int b = (int)((sin(hue * 2 * PI + 4.2) * 127 + 128) * pulse / 255);
+
+  ledcWrite(LED_R, r); ledcWrite(LED_G, g); ledcWrite(LED_B, b);
